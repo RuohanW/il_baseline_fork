@@ -93,6 +93,12 @@ class BaseCallback(ABC):
     def _on_training_end(self) -> None:
         pass
 
+    def _after_train_step(self) -> None:
+        pass
+
+    def after_train_step(self) -> None:
+        self._after_train_step()
+
     def on_rollout_end(self) -> None:
         self._on_rollout_end()
 
@@ -200,6 +206,10 @@ class CallbackList(BaseCallback):
         for callback in self.callbacks:
             callback.on_training_end()
 
+    def _after_train_step(self) -> None:
+        for callback in self.callbacks:
+            callback.after_train_step()
+
     def update_child_locals(self, locals_: Dict[str, Any]) -> None:
         """
         Update the references to the local variables.
@@ -304,6 +314,8 @@ class EvalCallback(EventCallback):
         render: bool = False,
         verbose: int = 1,
         warn: bool = True,
+        best_name: str = "best_model",
+        use_alt_reward: bool = False,
     ):
         super(EvalCallback, self).__init__(callback_on_new_best, verbose=verbose)
         self.n_eval_episodes = n_eval_episodes
@@ -313,6 +325,8 @@ class EvalCallback(EventCallback):
         self.deterministic = deterministic
         self.render = render
         self.warn = warn
+        self.best_name = best_name
+        self.use_alt_reward = use_alt_reward
 
         # Convert to VecEnv for consistency
         if not isinstance(eval_env, VecEnv):
@@ -351,12 +365,21 @@ class EvalCallback(EventCallback):
         :param locals_:
         :param globals_:
         """
-        info = locals_["info"]
+        # info = locals_["info"]
+        #
+        # if locals_["done"]:
+        #     maybe_is_success = info.get("is_success")
+        #     if maybe_is_success is not None:
+        #         self._is_success_buffer.append(maybe_is_success)
 
-        if locals_["done"]:
-            maybe_is_success = info.get("is_success")
-            if maybe_is_success is not None:
-                self._is_success_buffer.append(maybe_is_success)
+        infos = locals_["infos"]
+        dones = locals_["dones"]
+
+        for info, done in zip(infos, dones):
+            if done:
+                maybe_is_success = info.get("is_success")
+                if maybe_is_success is not None:
+                    self._is_success_buffer.append(maybe_is_success)
 
     def _on_step(self) -> bool:
 
@@ -367,7 +390,7 @@ class EvalCallback(EventCallback):
             # Reset success rate buffer
             self._is_success_buffer = []
 
-            episode_rewards, episode_lengths = evaluate_policy(
+            episode_rewards, episode_lengths, alt_rewards = evaluate_policy(
                 self.model,
                 self.eval_env,
                 n_eval_episodes=self.n_eval_episodes,
@@ -399,10 +422,18 @@ class EvalCallback(EventCallback):
 
             mean_reward, std_reward = np.mean(episode_rewards), np.std(episode_rewards)
             mean_ep_length, std_ep_length = np.mean(episode_lengths), np.std(episode_lengths)
-            self.last_mean_reward = mean_reward
+            if len(alt_rewards) > 0:
+                alt_mean_reward, alt_std_reward = np.mean(alt_rewards), np.std(alt_rewards)
+
+            if self.use_alt_reward and len(alt_rewards) > 0:
+                self.last_mean_reward = alt_mean_reward
+            else:
+                self.last_mean_reward = mean_reward
 
             if self.verbose > 0:
-                print(f"Eval num_timesteps={self.num_timesteps}, " f"episode_reward={mean_reward:.2f} +/- {std_reward:.2f}")
+                if len(alt_rewards) > 0:
+                    print(f"Eval num_timesteps={self.num_timesteps}, " f"Alt_reward={alt_mean_reward:.2f} +/- {alt_std_reward:.2f}")
+                print(f"Eval num_timesteps={self.num_timesteps}, " f"Real_reward={mean_reward:.2f} +/- {std_reward:.2f}")
                 print(f"Episode length: {mean_ep_length:.2f} +/- {std_ep_length:.2f}")
             # Add to current Logger
             self.logger.record("eval/mean_reward", float(mean_reward))
@@ -422,7 +453,7 @@ class EvalCallback(EventCallback):
                 if self.verbose > 0:
                     print("New best mean reward!")
                 if self.best_model_save_path is not None:
-                    self.model.save(os.path.join(self.best_model_save_path, "best_model"))
+                    self.model.save(os.path.join(self.best_model_save_path, self.best_name))
                 self.best_mean_reward = mean_reward
                 # Trigger callback if needed
                 if self.callback is not None:

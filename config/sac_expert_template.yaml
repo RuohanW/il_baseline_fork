@@ -1,0 +1,30 @@
+hydra:
+  output_subdir: null
+  run:
+    dir: "."
+
+defaults:
+  - hydra/job_logging: disabled
+
+env_id: "Hopper-v3"
+train_steps: 2e6
+n_envs: 1
+n_evals: 50
+
+eval_freq: 10000
+
+batch_size: 256
+learning_rate: 0.0004
+
+gradient_steps: 1
+train_freq: 1
+
+buffer_size: 300000
+learning_start: 10000
+
+policy_kwargs: "dict(log_std_init=-3, net_arch=[512, 512])"
+
+gamma: 0.99
+tau: 0.01
+
+trial: 2

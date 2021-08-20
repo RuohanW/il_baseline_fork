@@ -6,6 +6,8 @@ import numpy as np
 import torch as th
 from gym import spaces
 
+import copy
+
 from stable_baselines3.common.preprocessing import get_action_dim, get_obs_shape
 from stable_baselines3.common.type_aliases import (
     DictReplayBufferSamples,
@@ -739,3 +741,174 @@ class DictRolloutBuffer(RolloutBuffer):
             advantages=self.to_torch(self.advantages[batch_inds].flatten()),
             returns=self.to_torch(self.returns[batch_inds].flatten()),
         )
+
+
+class ReplayBufferByEpisode(BaseBuffer):
+    """
+    Replay buffer used in off-policy algorithms like SAC/TD3.
+
+    :param buffer_size: Max number of element in the buffer
+    :param observation_space: Observation space
+    :param action_space: Action space
+    :param device:
+    :param n_envs: Number of parallel environments
+    :param optimize_memory_usage: Enable a memory efficient variant
+        of the replay buffer which reduces by almost a factor two the memory used,
+        at a cost of more complexity.
+        See https://github.com/DLR-RM/stable-baselines3/issues/37#issuecomment-637501195
+        and https://github.com/DLR-RM/stable-baselines3/pull/28#issuecomment-637559274
+    :param handle_timeout_termination: Handle timeout termination (due to timelimit)
+        separately and treat the task as infinite horizon task.
+        https://github.com/DLR-RM/stable-baselines3/issues/284
+    """
+
+    def __init__(
+        self,
+        buffer_size: int,
+        observation_space: spaces.Space,
+        action_space: spaces.Space,
+        device: Union[th.device, str] = "cpu",
+        n_envs: int = 1,
+        optimize_memory_usage: bool = False,
+        handle_timeout_termination: bool = True,
+        n_step: int = 3,
+        gamma: int = 0.99
+    ):
+        super(ReplayBufferByEpisode, self).__init__(buffer_size, observation_space, action_space, device, n_envs=n_envs)
+
+        assert n_envs == 1, "Replay buffer only support single environment for now"
+
+        self.optimize_memory_usage = optimize_memory_usage
+        self.n_step = n_step
+        self.gamma = gamma
+
+        self.episodes = []
+        self.cur_epi = []
+        self.size = 0
+        self.ep_size = []
+
+        self.next_obs = None
+
+
+    def add(
+        self,
+        obs: np.ndarray,
+        next_obs: np.ndarray,
+        action: np.ndarray,
+        reward: np.ndarray,
+        done: np.ndarray,
+        infos: List[Dict[str, Any]],
+    ) -> None:
+        # Copy to avoid modification by reference
+        time_limit = False
+        for info in infos:
+            if info.get("TimeLimit.truncated", False):
+                time_limit = True
+                break
+        real_done = done * (1 - int(time_limit))
+
+        # if self.next_obs is None:
+        #     self.next_obs = next_obs
+        # else:
+        #     if done:
+        #         self.next_obs = None
+        #     else:
+        #         assert(np.all(self.next_obs == obs))
+        #         self.next_obs = next_obs
+
+        self.cur_epi.append(
+            (
+                obs.copy(),
+                action.copy(),
+                reward,
+                real_done,
+                # next_obs.copy()
+            )
+        )
+
+        self.size += 1
+        if self.size >= self.buffer_size:
+            remove_size = len(self.episodes[0])
+            self.size -= remove_size
+            self.episodes = self.episodes[1:]
+            self.ep_size = self.ep_size[1:]
+
+        if done:
+            if next_obs.ndim == 1:
+                next_obs = np.expand_dims(next_obs, axis=0)
+            self.ep_size.append(len(self.cur_epi))
+            #handling terminal states
+            self.cur_epi.append(
+                (
+                    next_obs.copy(),
+                    None,
+                    0,
+                    1,
+                )
+            )
+            self.episodes.append(self.cur_epi)
+            self.cur_epi = []
+
+    def _sample_episodes(self, batch_size):
+        u = np.random.uniform(size=(batch_size, len(self.ep_size)))
+        return np.argmax(np.expand_dims(np.log(self.ep_size), axis=0) - np.log(-np.log(u)), axis=-1)
+
+
+    def sample(self, batch_size: int, env: Optional[VecNormalize] = None) -> ReplayBufferSamples:
+        """
+        Sample elements from the replay buffer.
+        Custom sampling when using memory efficient variant,
+        as we should not sample the element with index `self.pos`
+        See https://github.com/DLR-RM/stable-baselines3/pull/28#issuecomment-637559274
+
+        :param batch_size: Number of element to sample
+        :param env: associated gym VecEnv
+            to normalize the observations/rewards when sampling
+        :return:
+        """
+        # epi_index = np.random.randint(0, len(self.episodes), batch_size) #there is an bias towards shorter episodes, may need to change
+        epi_index = self._sample_episodes(batch_size)
+        ret = []
+        for ind in epi_index:
+            ret.append(self._get_sample(ind))
+
+        obs, actions, next_obs, rewards, dones = zip(*ret)
+        obs = np.concatenate(obs).astype(self.observation_space.dtype)
+        actions = np.concatenate(actions, axis=0).astype(self.action_space.dtype)
+        next_obs = np.concatenate(next_obs, axis=0).astype(np.float32)
+        rewards = np.stack(rewards, axis=0).astype(np.float32)
+        dones = np.stack(dones, axis=0).astype(np.float32)
+
+        data = (
+            self._normalize_obs(obs, env),
+            actions,
+            self._normalize_obs(next_obs, env),
+            # Only use dones that are not due to timeouts
+            # deactivated by default (timeouts is initialized as an array of False)
+            dones,
+            self._normalize_reward(rewards, env),
+        )
+
+        return ReplayBufferSamples(*tuple(map(self.to_torch, data)))
+
+    def _get_sample(self, i):
+        episode = self.episodes[i]
+        assert(episode[-1][2] == 0) #sanity check that the terminal state is handled
+        idx = np.random.randint(0, len(episode) - 1)
+        obs = episode[idx][0]
+        action = episode[idx][1]
+        # next_obs = episode[idx][4]
+        num_step = min(self.n_step, len(episode) - idx - 1)
+        next_obs = episode[idx + num_step][0]
+        # reward = episode[idx][2]
+        reward = np.zeros_like(episode[idx][2])
+        done = episode[idx + num_step - 1][3] #whether we will crash within n_step
+        discount = 1
+        for i in range(num_step):
+            step_reward = episode[idx + i][2]
+            reward += discount * step_reward
+            discount *= self.gamma
+        return obs, action, next_obs, reward, done
+
+    def _get_samples(self, batch_inds: np.ndarray, env: Optional[VecNormalize] = None) -> ReplayBufferSamples:
+        return None

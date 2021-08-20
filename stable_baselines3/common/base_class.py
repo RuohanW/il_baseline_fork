@@ -99,6 +99,7 @@ class BaseAlgorithm(ABC):
         use_sde: bool = False,
         sde_sample_freq: int = -1,
         supported_action_spaces: Optional[Tuple[gym.spaces.Space, ...]] = None,
+        alt_reward = None,
     ):
 
         if isinstance(policy, str) and policy_base is not None:
@@ -149,6 +150,8 @@ class BaseAlgorithm(ABC):
         self._logger = None  # type: Logger
         # Whether the user passed a custom logger or not
         self._custom_logger = False
+        # whether use any alterantive reward function (e.g. GAIL)
+        self.alt_reward = alt_reward
 
         # Create and wrap the env if needed
         if env is not None:
@@ -308,7 +311,7 @@ class BaseAlgorithm(ABC):
         return [
             "policy",
             "device",
-            "env",
+            # "env",
             "eval_env",
             "replay_buffer",
             "rollout_buffer",
@@ -740,6 +743,7 @@ class BaseAlgorithm(ABC):
         # Copy parameter list so we don't mutate the original dict
         data = self.__dict__.copy()
 
+
         # Exclude is union of specified parameters (if any) and standard exclusions
         if exclude is None:
             exclude = []
@@ -773,3 +777,15 @@ class BaseAlgorithm(ABC):
         params_to_save = self.get_parameters()
 
         save_to_zip_file(path, data=data, params=params_to_save, pytorch_variables=pytorch_variables)
+
+    def maybe_replace_reward(self, transition_buffer):
+        """
+        possibly updating transition with alt reward
+        """
+        return transition_buffer
+
+    def get_alt_reward(self, obs, actions):
+        """
+        get alt reward R(s, a) in batch mode
+        """
+        return self.alt_reward(obs, actions)

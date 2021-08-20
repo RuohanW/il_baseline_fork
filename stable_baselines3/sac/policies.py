@@ -4,7 +4,7 @@ import gym
 import torch as th
 from torch import nn
 
-from stable_baselines3.common.distributions import SquashedDiagGaussianDistribution, StateDependentNoiseDistribution
+from stable_baselines3.common.distributions import SquashedDiagGaussianDistribution, StateDependentNoiseDistribution, DiagGaussianDistribution
 from stable_baselines3.common.policies import BasePolicy, ContinuousCritic, create_sde_features_extractor, register_policy
 from stable_baselines3.common.preprocessing import get_action_dim
 from stable_baselines3.common.torch_layers import (
@@ -110,6 +110,7 @@ class Actor(BasePolicy):
                 self.mu = nn.Sequential(self.mu, nn.Hardtanh(min_val=-clip_mean, max_val=clip_mean))
         else:
             self.action_dist = SquashedDiagGaussianDistribution(action_dim)
+            # self.action_dist = DiagGaussianDistribution(action_dim)
             self.mu = nn.Linear(last_layer_dim, action_dim)
             self.log_std = nn.Linear(last_layer_dim, action_dim)
 

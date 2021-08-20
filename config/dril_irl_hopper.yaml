@@ -1,0 +1,71 @@
+hydra:
+  output_subdir: null
+  run:
+    dir: "."
+
+defaults:
+  - hydra/job_logging: disabled
+
+env_id: "Hopper-v3"
+n_envs: 5
+n_evals: 50
+
+trial: 1
+save_dir: "saves"
+save_name: "sac_Hopper-v3_1.zip"
+demo_name: "sac_Hopper_demo"
+
+n_trajs: 4
+traj_length: 1000
+
+
+#lr: 3e-4
+#batch_size: 128
+#weight_decay: 0
+#epochs: 200
+
+#BC parameters
+lr: 2.5e-4
+batch_size: 128
+weight_decay: 0
+epochs: 200
+
+#RL parameters
+policy_kwargs: "dict(net_arch=[400, 300])"
+
+train_steps: 5e6
+
+rl_batch_size: 256
+learning_rate: 0.0004
+#  0.0004
+
+gradient_steps: 40
+train_freq: 40
+
+buffer_size: 300000
+learning_start: 0
+
+gamma: 0.99
+tau: 0.01
+
+eval_freq: 5000
+
+#dril paras
+env_name: "Hopper-v3"
+num_trajs: 4
+seed: 0
+ensemble_shuffle_type: "sample_w_replace"
+device: "cuda"
+uncertainty_reward: "ensemble"
+ensemble_hidden_size: 512
+ensemble_drop_rate: 0.1
+ensemble_size: 5
+ensemble_batch_size: 100
+ensemble_lr: 2.5e-4
+num_ensemble_train_epoch: 1000
+training_data_split: 0.9
+save_model_dir: "../saves"
+save_results_dir: "../saves"
+ensemble_quantile_threshold: 0.98
+dril_cost_clip : "-1_to_1"
+dril_uncertainty_reward: "ensemble"

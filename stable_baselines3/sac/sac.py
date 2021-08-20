@@ -101,6 +101,7 @@ class SAC(OffPolicyAlgorithm):
         seed: Optional[int] = None,
         device: Union[th.device, str] = "auto",
         _init_setup_model: bool = True,
+        alt_reward = None,
     ):
 
         super(SAC, self).__init__(
@@ -129,6 +130,7 @@ class SAC(OffPolicyAlgorithm):
             use_sde_at_warmup=use_sde_at_warmup,
             optimize_memory_usage=optimize_memory_usage,
             supported_action_spaces=(gym.spaces.Box),
+            alt_reward=alt_reward
         )
 
         self.target_entropy = target_entropy

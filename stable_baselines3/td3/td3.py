@@ -86,6 +86,9 @@ class TD3(OffPolicyAlgorithm):
         seed: Optional[int] = None,
         device: Union[th.device, str] = "auto",
         _init_setup_model: bool = True,
+        alt_reward = None,
+        pretrain = False,
+        wd_metric = None,
     ):
 
         super(TD3, self).__init__(
@@ -112,11 +115,15 @@ class TD3(OffPolicyAlgorithm):
             sde_support=False,
             optimize_memory_usage=optimize_memory_usage,
             supported_action_spaces=(gym.spaces.Box),
+            alt_reward= alt_reward,
+            pretrain=pretrain,
         )
 
         self.policy_delay = policy_delay
         self.target_noise_clip = target_noise_clip
         self.target_policy_noise = target_policy_noise
+
+        self.wd_metric = wd_metric
 
         if _init_setup_model:
             self._setup_model()
@@ -173,6 +180,11 @@ class TD3(OffPolicyAlgorithm):
                 actor_loss = -self.critic.q1_forward(replay_data.observations, self.actor(replay_data.observations)).mean()
                 actor_losses.append(actor_loss.item())
 
+                if self.wd_metric:
+                    wd_loss = self.wd_metric(replay_data.observations, self.actor(replay_data.observations))
+                    # actor_loss += 2 * wd_loss
+                    actor_loss = 0.2 * actor_loss + wd_loss
+
                 # Optimize the actor
                 self.actor.optimizer.zero_grad()
                 actor_loss.backward()
@@ -180,6 +192,12 @@ class TD3(OffPolicyAlgorithm):
 
                 polyak_update(self.critic.parameters(), self.critic_target.parameters(), self.tau)
                 polyak_update(self.actor.parameters(), self.actor_target.parameters(), self.tau)
+
+        if self.wd_metric:
+            for _ in range(gradient_steps):
+                replay_data = self.replay_buffer.sample(batch_size, env=self._vec_normalize_env)
+                self.wd_metric.update_wd(replay_data.observations, self.actor(replay_data.observations))
+
 
         self.logger.record("train/n_updates", self._n_updates, exclude="tensorboard")
         if len(actor_losses) > 0:

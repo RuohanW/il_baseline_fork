@@ -1,0 +1,33 @@
+hydra:
+  output_subdir: null
+  run:
+    dir: "."
+
+defaults:
+  - hydra/job_logging: disabled
+
+env_id: "Hopper-v3"
+n_envs: 5
+n_evals: 50
+
+policy_kwargs: "dict(net_arch=[400, 300])"
+
+trial: 1
+save_dir: "saves"
+save_name: "sac_Hopper-v3_1.zip"
+demo_name: "sac_Hopper_demo"
+
+n_trajs: 4
+traj_length: 1000
+
+
+#lr: 3e-4
+#batch_size: 128
+#weight_decay: 0
+#epochs: 200
+
+
+lr: 3e-4
+batch_size: 128
+weight_decay: 0
+epochs: 200

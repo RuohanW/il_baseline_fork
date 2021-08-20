@@ -14,11 +14,12 @@ def evaluate_policy(
     n_eval_episodes: int = 10,
     deterministic: bool = True,
     render: bool = False,
-    callback: Optional[Callable[[Dict[str, Any], Dict[str, Any]], None]] = None,
+    # callback: Optional[Callable[[Dict[str, Any], Dict[str, Any]], None]] = None,
+    callback = None,
     reward_threshold: Optional[float] = None,
     return_episode_rewards: bool = False,
     warn: bool = True,
-) -> Union[Tuple[float, float], Tuple[List[float], List[int]]]:
+) -> Union[Tuple[float, float], Tuple[List[float], List[int]], Tuple[List[float], List[int], List[float]]]:
     """
     Runs policy for ``n_eval_episodes`` episodes and returns average reward.
     If a vector env is passed in, this divides the episodes to evaluate onto the
@@ -73,19 +74,22 @@ def evaluate_policy(
     episode_rewards = []
     episode_lengths = []
 
+    done_envs = []
+
     episode_counts = np.zeros(n_envs, dtype="int")
     # Divides episodes among different sub environments in the vector as evenly as possible
     episode_count_targets = np.array([(n_eval_episodes + i) // n_envs for i in range(n_envs)], dtype="int")
 
     current_rewards = np.zeros(n_envs)
     current_lengths = np.zeros(n_envs, dtype="int")
-    observations = env.reset()
+    cur_observations = env.reset()
     states = None
     while (episode_counts < episode_count_targets).any():
-        actions, states = model.predict(observations, state=states, deterministic=deterministic)
-        observations, rewards, dones, infos = env.step(actions)
+        actions, states = model.predict(cur_observations, state=states, deterministic=deterministic)
+        next_observations, rewards, dones, infos = env.step(actions)
         current_rewards += rewards
         current_lengths += 1
+
         for i in range(n_envs):
             if episode_counts[i] < episode_count_targets[i]:
 
@@ -94,10 +98,8 @@ def evaluate_policy(
                 done = dones[i]
                 info = infos[i]
 
-                if callback is not None:
-                    callback(locals(), globals())
-
                 if dones[i]:
+                    done_envs.append(i)
                     if is_monitor_wrapped:
                         # Atari wrapper can send a "done" signal when
                         # the agent loses a life, but it does not correspond
@@ -119,13 +121,22 @@ def evaluate_policy(
                     if states is not None:
                         states[i] *= 0
 
+        if callback is not None:
+            callback(locals(), globals())
+
+        cur_observations = next_observations
         if render:
             env.render()
+
+    alt_rewards = []
+    if callback is not None and hasattr(callback, "on_done"):
+        alt_rewards = alt_rewards = callback.on_done(locals(), globals())
 
     mean_reward = np.mean(episode_rewards)
     std_reward = np.std(episode_rewards)
     if reward_threshold is not None:
         assert mean_reward > reward_threshold, "Mean reward below threshold: " f"{mean_reward:.2f} < {reward_threshold:.2f}"
     if return_episode_rewards:
-        return episode_rewards, episode_lengths
+        return episode_rewards, episode_lengths, alt_rewards
+        # return episode_rewards, episode_lengths
     return mean_reward, std_reward

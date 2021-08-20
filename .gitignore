@@ -47,3 +47,7 @@ src
 *.prof
 
 MUJOCO_LOG.TXT
+
+irl/logs
+irl/saves
+saves/

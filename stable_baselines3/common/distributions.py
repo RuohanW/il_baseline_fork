@@ -225,6 +225,7 @@ class SquashedDiagGaussianDistribution(DiagGaussianDistribution):
         log_prob -= th.sum(th.log(1 - actions ** 2 + self.epsilon), dim=1)
         return log_prob
 
+
     def entropy(self) -> Optional[th.Tensor]:
         # No analytical form,
         # entropy needs to be estimated using -log_prob.mean()
